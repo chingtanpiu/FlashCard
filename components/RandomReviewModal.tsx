@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, Shuffle, ArrowRight, CheckCircle2, AlertCircle, HelpCircle, Trophy, Home, RotateCcw } from 'lucide-react';
 import { Flashcard, Familiarity } from '../types';
 import FlashcardItem from './FlashcardItem';
@@ -23,6 +23,9 @@ const RandomReviewModal: React.FC<RandomReviewModalProps> = ({
   const [animationKey, setAnimationKey] = useState(0);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const [isFinished, setIsFinished] = useState(false);
+  
+  // 用于防止快速点击导致的逻辑冲突
+  const isProcessingRef = useRef(false);
 
   // 计算进度
   const progressCount = seenIds.size;
@@ -70,11 +73,14 @@ const RandomReviewModal: React.FC<RandomReviewModalProps> = ({
 
     // 如果还有未看的题目，且随机到了刚看过的题目，重新抽（除非只剩这一张）
     if (pool.length > 1 && selectedId === currentCardId) {
-      return pickRandomCard();
+      // 递归重抽，但加个最大层数防止死循环（理论上不会）
+      return; 
     }
 
+    // 状态更新
     setCurrentCardId(selectedId);
     setAnimationKey(prev => prev + 1);
+    isProcessingRef.current = false;
     
     // 更新已查看集合
     setSeenIds(prev => {
@@ -88,29 +94,51 @@ const RandomReviewModal: React.FC<RandomReviewModalProps> = ({
     return cards.find(c => c.id === currentCardId) || null;
   }, [cards, currentCardId]);
 
+  // 初始化加载
   useEffect(() => {
     if (!currentCardId && cards.length > 0) {
       pickRandomCard();
     }
   }, [cards, currentCardId, pickRandomCard]);
 
+  // 容错处理：如果当前卡片被删了
   useEffect(() => {
     if (currentCardId && !cards.find(c => c.id === currentCardId)) {
-      if (cards.length > 0) pickRandomCard();
-      else onClose();
+      if (cards.length > 0) {
+        isProcessingRef.current = false;
+        pickRandomCard();
+      } else {
+        onClose();
+      }
     }
   }, [cards, currentCardId, pickRandomCard, onClose]);
 
   const handleFamiliarityFeedback = (feedback: Familiarity) => {
-    if (!currentCardId) return;
+    if (!currentCardId || isProcessingRef.current) return;
+    
+    isProcessingRef.current = true; // 锁定，防止重复点击
+
+    // 1. 乐观更新：这里调用父组件更新状态（无论是本地还是云端，这里都是立即执行）
     onUpdateFamiliarity(currentCardId, feedback);
-    setTimeout(pickRandomCard, 200);
+
+    // 2. 界面切换：为了视觉上的节奏感，保留极短的 150ms 停顿，
+    // 让用户看到按钮按下的反馈，而不是网络延迟。
+    // 如果是云端请求，这个请求会异步在后台发送，不会阻塞这里的 setTimeout。
+    setTimeout(() => {
+      pickRandomCard();
+    }, 150);
   };
+
+  const handleSkip = () => {
+    if (isProcessingRef.current) return;
+    pickRandomCard();
+  }
 
   const handleRestart = () => {
     setSeenIds(new Set());
     setIsFinished(false);
     setCurrentCardId(null);
+    isProcessingRef.current = false;
     // 强制触发一次抽取
     setTimeout(() => {
       pickRandomCard();
@@ -233,7 +261,7 @@ const RandomReviewModal: React.FC<RandomReviewModalProps> = ({
           </div>
 
           <button 
-            onClick={pickRandomCard}
+            onClick={handleSkip}
             className="mt-2 group px-8 py-4 bg-white text-indigo-600 rounded-3xl font-black text-lg shadow-2xl flex items-center gap-4 hover:scale-105 active:scale-95 transition-all"
           >
             跳过并换一题
