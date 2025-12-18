@@ -1,7 +1,5 @@
 {
   "name": "极简闪卡",
   "description": "智能加权复习闪卡app，支持陌生、可能会忘、熟悉三种状态管理，支持批量导入导出。",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "requestFramePermissions": []
 }
